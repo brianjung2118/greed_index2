@@ -244,6 +244,43 @@ def main():
     )
     st.altair_chart(combined, use_container_width=True)
 
+    # -------------------------------------------------------------------------
+    # Full history: price vs greed ratio overlay (normalized 0–1 for co-movement)
+    # -------------------------------------------------------------------------
+    st.subheader("Price vs greed ratio — full history (normalized)")
+    st.caption("Both series scaled to 0–1 over the last 5 years so you can compare co-movements. One chart, one scale.")
+
+    ts_df = merged.copy()
+    ts_df["price"] = pd.to_numeric(ts_df["price"], errors="coerce")
+    ts_df["greed_ratio"] = pd.to_numeric(ts_df["greed_ratio"], errors="coerce")
+    ts_df = ts_df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+    p_min, p_max = ts_df["price"].min(), ts_df["price"].max()
+    g_min, g_max = ts_df["greed_ratio"].min(), ts_df["greed_ratio"].max()
+    p_range = p_max - p_min if (p_max - p_min) > 0 else 1.0
+    g_range = g_max - g_min if (g_max - g_min) > 0 else 1.0
+    ts_df["price_norm"] = (ts_df["price"] - p_min) / p_range
+    ts_df["greed_norm"] = (ts_df["greed_ratio"] - g_min) / g_range
+    ts_df["date_str"] = ts_df["date"].dt.strftime("%Y-%m-%d")
+
+    if ts_df.empty or (ts_df["price_norm"].notna().sum() == 0 and ts_df["greed_norm"].notna().sum() == 0):
+        st.info("No data to show for price vs greed ratio over the period.")
+    else:
+        price_ts = alt.Chart(ts_df).mark_line(stroke="steelblue", strokeWidth=2).encode(
+            x=alt.X("date:T", title="Date"),
+            y=alt.Y("price_norm:Q", title="Normalized (0–1)", scale=alt.Scale(domain=[0, 1])),
+            tooltip=["date_str:N", "price:Q", "greed_ratio:Q"],
+        )
+        greed_ts = alt.Chart(ts_df).mark_line(stroke="green", strokeWidth=2, strokeDash=[4, 2]).encode(
+            x=alt.X("date:T", title="Date"),
+            y=alt.Y("greed_norm:Q", title="Normalized (0–1)", scale=alt.Scale(domain=[0, 1])),
+            tooltip=["date_str:N", "price:Q", "greed_ratio:Q"],
+        )
+        overlay = (price_ts + greed_ts).properties(
+            height=350,
+            title=f"Price (blue) vs greed ratio (green) — {code} — last {YEARS_LOOKBACK} years",
+        )
+        st.altair_chart(overlay, use_container_width=True)
+
     st.subheader("Greed ratio & income (time series)")
     st.caption("Only dates where both greed ratio and income exist. Both series normalized to 0–1. Greed from KcBERT panel.")
 
