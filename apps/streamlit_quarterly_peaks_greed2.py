@@ -365,7 +365,7 @@ def main():
     # Last chart: triple overlay — price + greed + fundamentals (all normalized, common time frame)
     # -------------------------------------------------------------------------
     st.subheader("Price, greed ratio & fundamentals — one chart (normalized)")
-    st.caption("Only dates where price, greed ratio, and income all exist. All three scaled to 0–1. Rolling window below applies to both price and greed ratio.")
+    st.caption("Price and greed use all available dates; quarterly income is forward-filled so the last quarter extends to the latest date. All three scaled to 0–1. Rolling window below applies to both price and greed ratio.")
 
     if fund_df is None or fund_df.empty:
         st.info("No fundamentals data for this stock. Add greed2/fundamentals/{code}.csv to see the triple overlay.")
@@ -387,10 +387,12 @@ def main():
         triple_df = full_merged.copy()
         triple_df["price"] = pd.to_numeric(triple_df["price"], errors="coerce")
         triple_df["greed_ratio"] = pd.to_numeric(triple_df["greed_ratio"], errors="coerce")
-        triple_df = triple_df.merge(fund_df[["date", "income"]], on="date", how="inner")
+        triple_df = triple_df.merge(fund_df[["date", "income"]], on="date", how="left")
+        triple_df = triple_df.sort_values("date").reset_index(drop=True)
+        triple_df["income"] = triple_df["income"].ffill()  # extend last quarterly value to latest date
         triple_df = triple_df.dropna(subset=["date", "price", "greed_ratio", "income"]).sort_values("date").reset_index(drop=True)
         if triple_df.empty:
-            st.info("No overlapping dates with price, greed ratio, and income.")
+            st.info("No overlapping dates with price, greed ratio, and income (need at least one quarter with fundamentals).")
         else:
             triple_df["price_rolled"] = triple_df["price"].rolling(window=roll_days_triple, min_periods=1).mean()
             triple_df["greed_ratio_rolled"] = triple_df["greed_ratio"].rolling(window=roll_days_triple, min_periods=1).mean()
