@@ -168,6 +168,7 @@ def main():
 
     greed_df = get_greed_for_stock(panel, code)
     full_merged = merge_price_and_greed(price_full, greed_df)
+    fund_df = load_fundamentals_csv(code)
     window_days = st.slider("Window around peak (days before/after)", 1, 60, DEFAULT_WINDOW_DAYS)
 
     peaks, windows = quarterly_peaks_and_windows(price_df, window_days)
@@ -304,9 +305,8 @@ def main():
         st.altair_chart(overlay, use_container_width=True)
 
     st.subheader("Greed ratio & income (time series)")
-    st.caption("Only dates where both greed ratio and income exist. Both series normalized to 0–1. Greed from KcBERT panel.")
+    st.caption("Only dates where both greed ratio and income exist (last 5 years). Both series normalized to 0–1. Greed from KcBERT panel.")
 
-    fund_df = load_fundamentals_csv(code)
     if fund_df is None or fund_df.empty:
         st.info("No fundamentals data for this stock. Add a CSV in greed2/fundamentals/{code}.csv with date and operating_income or net_income.")
     else:
@@ -360,6 +360,71 @@ def main():
                 title=f"Greed ratio (KcBERT) & income — {greed_roll_label} (green = greed, blue = income)",
             )
             st.altair_chart(chart_gi, use_container_width=True)
+
+    # -------------------------------------------------------------------------
+    # Last chart: triple overlay — price + greed + fundamentals (all normalized, common time frame)
+    # -------------------------------------------------------------------------
+    st.subheader("Price, greed ratio & fundamentals — one chart (normalized)")
+    st.caption("Only dates where price, greed ratio, and income all exist. All three scaled to 0–1. Rolling window below applies to both price and greed ratio.")
+
+    if fund_df is None or fund_df.empty:
+        st.info("No fundamentals data for this stock. Add greed2/fundamentals/{code}.csv to see the triple overlay.")
+    else:
+        roll_options_triple = {
+            "Daily (no rolling)": 1,
+            "1 week (7 days)": 7,
+            "1 month (30 days)": 30,
+            "Quarterly (90 days)": 90,
+        }
+        roll_label_triple = st.selectbox(
+            "Rolling window for price & greed ratio",
+            options=list(roll_options_triple.keys()),
+            index=1,
+            key="roll_triple",
+        )
+        roll_days_triple = roll_options_triple[roll_label_triple]
+
+        triple_df = full_merged.copy()
+        triple_df["price"] = pd.to_numeric(triple_df["price"], errors="coerce")
+        triple_df["greed_ratio"] = pd.to_numeric(triple_df["greed_ratio"], errors="coerce")
+        triple_df = triple_df.merge(fund_df[["date", "income"]], on="date", how="inner")
+        triple_df = triple_df.dropna(subset=["date", "price", "greed_ratio", "income"]).sort_values("date").reset_index(drop=True)
+        if triple_df.empty:
+            st.info("No overlapping dates with price, greed ratio, and income.")
+        else:
+            triple_df["price_rolled"] = triple_df["price"].rolling(window=roll_days_triple, min_periods=1).mean()
+            triple_df["greed_ratio_rolled"] = triple_df["greed_ratio"].rolling(window=roll_days_triple, min_periods=1).mean()
+            p_min, p_max = triple_df["price_rolled"].min(), triple_df["price_rolled"].max()
+            g_min, g_max = triple_df["greed_ratio_rolled"].min(), triple_df["greed_ratio_rolled"].max()
+            i_min, i_max = triple_df["income"].min(), triple_df["income"].max()
+            p_range = (p_max - p_min) if (p_max - p_min) > 0 else 1.0
+            g_range = (g_max - g_min) if (g_max - g_min) > 0 else 1.0
+            i_range = (i_max - i_min) if (i_max - i_min) > 0 else 1.0
+            triple_df["price_norm"] = (triple_df["price_rolled"] - p_min) / p_range
+            triple_df["greed_norm"] = (triple_df["greed_ratio_rolled"] - g_min) / g_range
+            triple_df["income_norm"] = (triple_df["income"] - i_min) / i_range
+            triple_df["date_str"] = triple_df["date"].dt.strftime("%Y-%m-%d")
+
+            price_line_3 = alt.Chart(triple_df).mark_line(stroke="steelblue", strokeWidth=2).encode(
+                x=alt.X("date:T", title="Date"),
+                y=alt.Y("price_norm:Q", title="Normalized (0–1)", scale=alt.Scale(domain=[0, 1])),
+                tooltip=["date_str:N", "price_rolled:Q", "greed_ratio_rolled:Q", "income:Q"],
+            )
+            greed_line_3 = alt.Chart(triple_df).mark_line(stroke="green", strokeWidth=2, strokeDash=[4, 2]).encode(
+                x=alt.X("date:T", title="Date"),
+                y=alt.Y("greed_norm:Q", title="Normalized (0–1)", scale=alt.Scale(domain=[0, 1])),
+                tooltip=["date_str:N", "price_rolled:Q", "greed_ratio_rolled:Q", "income:Q"],
+            )
+            income_line_3 = alt.Chart(triple_df).mark_line(stroke="orange", strokeWidth=2, strokeDash=[2, 2]).encode(
+                x=alt.X("date:T", title="Date"),
+                y=alt.Y("income_norm:Q", title="Normalized (0–1)", scale=alt.Scale(domain=[0, 1])),
+                tooltip=["date_str:N", "price_rolled:Q", "greed_ratio_rolled:Q", "income:Q"],
+            )
+            triple_chart = (price_line_3 + greed_line_3 + income_line_3).properties(
+                height=350,
+                title=f"Price (blue), greed (green), income (orange) — {code} — {roll_label_triple}",
+            )
+            st.altair_chart(triple_chart, use_container_width=True)
 
 
 if __name__ == "__main__":
