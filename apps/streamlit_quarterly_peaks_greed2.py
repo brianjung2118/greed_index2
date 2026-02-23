@@ -407,6 +407,59 @@ def main():
             triple_df["income_norm"] = (triple_df["income"] - i_min) / i_range
             triple_df["date_str"] = triple_df["date"].dt.strftime("%Y-%m-%d")
 
+            # ---- Valuation signal detection ----
+            # Greed trend: positive slope over the last 30 rows (rolling linear slope proxy)
+            triple_df["greed_delta"] = triple_df["greed_norm"].diff(30).fillna(0)
+
+            # Undervalued: price < income AND greed is low (below 40th percentile)
+            greed_low_thresh = triple_df["greed_norm"].quantile(0.40)
+            triple_df["undervalued"] = (
+                (triple_df["price_norm"] < triple_df["income_norm"]) &
+                (triple_df["greed_norm"] < greed_low_thresh)
+            )
+
+            # Overvalued: price noticeably above income (>15% normalized gap) AND greed trending up
+            triple_df["overvalued"] = (
+                (triple_df["price_norm"] > triple_df["income_norm"] + 0.15) &
+                (triple_df["greed_delta"] > 0)
+            )
+
+            # Convert bool flags into date-range rectangles for shading
+            def flag_to_rects(df: pd.DataFrame, flag_col: str) -> pd.DataFrame:
+                """Collapse consecutive True rows into (start, end) intervals."""
+                rows = []
+                in_zone = False
+                start = None
+                for _, r in df.iterrows():
+                    if r[flag_col] and not in_zone:
+                        in_zone = True
+                        start = r["date"]
+                    elif not r[flag_col] and in_zone:
+                        in_zone = False
+                        rows.append({"start": start, "end": r["date"]})
+                if in_zone:
+                    rows.append({"start": start, "end": df["date"].iloc[-1]})
+                return pd.DataFrame(rows) if rows else pd.DataFrame(columns=["start", "end"])
+
+            uv_rects = flag_to_rects(triple_df, "undervalued")
+            ov_rects = flag_to_rects(triple_df, "overvalued")
+
+            # Altair background bands
+            uv_band = (
+                alt.Chart(uv_rects).mark_rect(opacity=0.12, color="green").encode(
+                    x=alt.X("start:T"),
+                    x2=alt.X2("end:T"),
+                )
+                if not uv_rects.empty else alt.Chart(pd.DataFrame()).mark_rect()
+            )
+            ov_band = (
+                alt.Chart(ov_rects).mark_rect(opacity=0.12, color="red").encode(
+                    x=alt.X("start:T"),
+                    x2=alt.X2("end:T"),
+                )
+                if not ov_rects.empty else alt.Chart(pd.DataFrame()).mark_rect()
+            )
+
             price_line_3 = alt.Chart(triple_df).mark_line(stroke="steelblue", strokeWidth=2).encode(
                 x=alt.X("date:T", title="Date"),
                 y=alt.Y("price_norm:Q", title="Normalized (0–1)", scale=alt.Scale(domain=[0, 1])),
@@ -422,11 +475,22 @@ def main():
                 y=alt.Y("income_norm:Q", title="Normalized (0–1)", scale=alt.Scale(domain=[0, 1])),
                 tooltip=["date_str:N", "price_rolled:Q", "greed_ratio_rolled:Q", "income:Q"],
             )
-            triple_chart = (price_line_3 + greed_line_3 + income_line_3).properties(
+            triple_chart = (
+                uv_band + ov_band + price_line_3 + greed_line_3 + income_line_3
+            ).properties(
                 height=350,
-                title=f"Price (blue), greed (green), income (orange) — {code} — {roll_label_triple}",
+                title=f"Price (blue), greed (green), income (orange) — {code} — {roll_label_triple} | 🟢 Undervalued  🔴 Overvalued",
             )
             st.altair_chart(triple_chart, use_container_width=True)
+
+            # Legend note
+            st.caption(
+                "**How valuation zones are determined** — all signals use the normalized (0–1) series shown in the chart. "
+                "🟢 **Undervalued zone**: price is *below* the income (fundamental) line AND the greed ratio is in its bottom 40th percentile (i.e. sentiment is cold or flat). "
+                "🔴 **Overvalued zone**: price is *more than 15 percentage points above* the income line AND the greed ratio was rising over the prior 30 trading days (trend turning up). "
+                "Bands are semi-transparent and can overlap with each other if signals conflict or alternate rapidly. "
+                "Thresholds (40th-pct greed, +0.15 price gap) are heuristic — adjust them in the source code to suit the stock's characteristics."
+            )
 
 
 if __name__ == "__main__":
