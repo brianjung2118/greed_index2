@@ -75,7 +75,7 @@ def get_greed_for_stock(panel: pd.DataFrame, code: str) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def load_fundamentals_csv(code: str) -> pd.DataFrame | None:
-    """Load fundamentals CSV; return DataFrame with date and 'income' (operating_income or net_income)."""
+    """Load fundamentals CSV; return DataFrame with date and 'income' (operating_income, net_income, or net_profit)."""
     path = FUNDAMENTALS_DIR / f"{code}.csv"
     if not path.exists():
         return None
@@ -87,6 +87,8 @@ def load_fundamentals_csv(code: str) -> pd.DataFrame | None:
         income_col = "operating_income"
     elif "net_income" in df.columns:
         income_col = "net_income"
+    elif "net_profit" in df.columns:
+        income_col = "net_profit"
     else:
         return None
     df["income"] = pd.to_numeric(df[income_col], errors="coerce")
