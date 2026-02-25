@@ -28,7 +28,7 @@ import altair as alt
 BASE_DIR = Path(__file__).resolve().parent.parent
 PRICES_DIR = BASE_DIR / "prices"
 FUNDAMENTALS_DIR = BASE_DIR / "fundamentals"
-FOCUS10_PANEL_PATH = BASE_DIR / "pipeline_output_attention" / "attention_greed_panel_daily_focus10_kcbert.csv"
+FOCUS10_PANEL_PATH = BASE_DIR / "pipeline_output_attention" / "attention_greed_panel_daily_focus10_kcbert_10k.csv"
 
 FOCUS_STOCKS = [
     "005930", "000660", "005380", "105560", "373220",
